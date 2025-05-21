@@ -97,9 +97,26 @@ class Peer:
 
     # Busca o tracker atual pelo NS (se houver)
     def _find_tracker(self, ns):
-        for name, uri in ns.list(prefix="tracker.").items():
-            return uri
-        return None
+        trackers = ns.list(prefix="tracker.")
+        if not trackers:
+            return None
+        # Encontra o tracker com a maior época
+        max_epoch = -1
+        selected_uri = None
+        for name, uri in trackers.items():
+            # O nome é 'tracker.<epoch>'
+            parts = name.split('.')
+            if len(parts) != 2:
+                continue
+            epoch_str = parts[1]
+            try:
+                epoch = int(epoch_str)
+                if epoch > max_epoch:
+                    max_epoch = epoch
+                    selected_uri = uri
+            except ValueError:
+                continue
+        return selected_uri
 
     # Notifica todos os peers de algum evento (eleição e resultado da eleição)
     def _notify_all_peers(self, ns, method, *args):
@@ -194,13 +211,21 @@ class Peer:
     # Torna o peer atual um tracker, rodando em novo daemon
     def virar_tracker(self, ns):
         self.is_tracker = True
-        daemon = Pyro5.api.Daemon() # NOVO daemon para o tracker
+        daemon = Pyro5.api.Daemon()  # Novo daemon para o tracker
         tracker = Tracker(self.epoch)
         tracker_uri = daemon.register(tracker)
         tracker_name = f"tracker.{self.epoch}"
+        # Remove trackers antigos do NS
+        existing_trackers = ns.list(prefix="tracker.")
+        for name in existing_trackers:
+            try:
+                ns.remove(name)
+            except Exception as e:
+                print(f"[{self.peer_id}] Erro ao remover tracker antigo: {e}")
+        # Registra o novo tracker
         ns.register(tracker_name, tracker_uri)
-        print(f"[{self.peer_id}] Virei Tracker! Registrado como {tracker_name}") # Debug pra ver se deu certo
-        # Tracker roda em background (thread separada)
+        print(f"[{self.peer_id}] Virei Tracker! Registrado como {tracker_name}")
+        # Inicia o loop do tracker em thread separada
         threading.Thread(target=daemon.requestLoop, daemon=True).start()
 
     # Atualiza o proxy local para o tracker mais recente registrado no NS
